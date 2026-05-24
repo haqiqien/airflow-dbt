@@ -1,0 +1,27 @@
+{
+  "name": "UGM Data Warehouse Devcontainer",
+  "dockerComposeFile": "docker-compose.yml",
+  "service": "devcontainer",
+  "workspaceFolder": "/workspace",
+  
+  // Menambahkan ekstensi VS Code yang sangat membantu pengerjaan proyek ini
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "Binnford.dbt-formatter",
+        "innoverio.vscode-dbt-power-user",
+        "mtxr.sqltools",
+        "mtxr.sqltools-driver-pg"
+      ]
+    }
+  },
+
+  // Perintah otomatis untuk setup database schema & inisialisasi Airflow pertama kali
+  "postCreateCommand": "mkdir -p /workspace/airflow /workspace/data && export AIRFLOW_HOME=/workspace/airflow && psql postgres://ugm_user:ugm_password@localhost:5432/procurement_dw -c 'CREATE SCHEMA IF NOT EXISTS raw; CREATE SCHEMA IF NOT EXISTS analytics;' && airflow db init && airflow users create --username admin --firstname UGM --lastname Mahasiswa --role Admin --email mhs@mail.ugm.ac.id --password admin",
+
+  // Membuka port agar UI Airflow dan Postgres bisa diakses secara lokal/forwarded
+  "forwardPorts": [8080, 5432],
+  
+  "remoteUser": "vscode"
+}
