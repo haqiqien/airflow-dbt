@@ -2,7 +2,10 @@
   "name": "UGM Data Warehouse Devcontainer",
   "dockerComposeFile": "docker-compose.yml",
   "service": "devcontainer",
-  
+  "remoteEnv": {
+    "AIRFLOW_HOME": "${workspaceFolder}airflow"
+  },
+
   "customizations": {
     "vscode": {
       "extensions": [
@@ -14,13 +17,8 @@
       ]
     }
   },
-
-  // Perintah postCreate dijalankan relatif terhadap workspace default Codespaces
-  "postCreateCommand": "mkdir -p $containerWorkspaceFolder/airflow $containerWorkspaceFolder/data && psql postgres://ugm_user:ugm_password@localhost:5432/procurement_dw -c 'CREATE SCHEMA IF NOT EXISTS raw; CREATE SCHEMA IF NOT EXISTS analytics;' && export AIRFLOW_HOME=$containerWorkspaceFolder/airflow && airflow db init && airflow users create --username admin --firstname UGM --lastname Mahasiswa --role Admin --email mhs@mail.ugm.ac.id --password admin",
-
-  // Menyalakan daemon secara otomatis pasca-startup
-  "postStartCommand": "export AIRFLOW_HOME=${containerWorkspaceFolder}/airflow && airflow webserver -D && airflow scheduler -D",
-
+  "postCreateCommand": "mkdir -p ${workspaceFolder}airflow ${workspaceFolder}data && psql postgres://ugm_user:ugm_password@localhost:5432/procurement_dw -c 'CREATE SCHEMA IF NOT EXISTS raw; CREATE SCHEMA IF NOT EXISTS analytics;' && airflow db init && airflow users create --username admin --firstname UGM --lastname MKom --role Admin --email example@domain.com --password admin",
+  "postStartCommand": "airflow webserver -D && airflow scheduler -D",
   "forwardPorts": [8080, 5432],
   "remoteUser": "vscode"
 }

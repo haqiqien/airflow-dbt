@@ -1,11 +1,5 @@
 FROM mcr.microsoft.com/devcontainers/python:3.10-bullseye
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    postgresql-client \
-    && apt-get clean && rm -rf /var/lib/apt/lists/*
-
-# Install libraries (Airflow, dbt, Cosmos)
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir \
     faker \

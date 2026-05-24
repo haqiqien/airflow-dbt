@@ -6,7 +6,6 @@ services:
       context: .
       dockerfile: Dockerfile
     volumes:
-      # Jalur mounting default yang direkomendasikan VS Code devcontainer
       - ..:/workspaces:cached
     command: sleep infinity
 
