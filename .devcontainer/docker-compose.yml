@@ -12,8 +12,8 @@ services:
   postgres:
     image: postgres:15-alpine
     environment:
-      POSTGRES_USER: ugm_user
-      POSTGRES_PASSWORD: ugm_password
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: admin
       POSTGRES_DB: procurement_dw
     volumes:
       - postgres_data:/var/lib/postgresql/data

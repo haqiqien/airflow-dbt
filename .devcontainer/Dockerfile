@@ -2,6 +2,7 @@ FROM mcr.microsoft.com/devcontainers/python:3.10-bullseye
 
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir \
+    flask-session==0.5.0 \
     faker \
     pandas \
     sqlalchemy \

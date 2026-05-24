@@ -3,9 +3,11 @@
   "dockerComposeFile": "docker-compose.yml",
   "service": "devcontainer",
   "remoteEnv": {
-    "AIRFLOW_HOME": "${workspaceFolder}airflow"
+    "AIRFLOW_HOME": "${containerWorkspaceFolder}/airflow",
+    "AIRFLOW__DATABASE__SQL_ALCHEMY_CONN": "postgresql+psycopg2://admin:admin@postgres:5432/procurement_dw",
+    "AIRFLOW__CORE__EXECUTOR": "LocalExecutor",
+    "AIRFLOW__CORE__LOAD_EXAMPLES": "False" 
   },
-
   "customizations": {
     "vscode": {
       "extensions": [
@@ -17,8 +19,14 @@
       ]
     }
   },
-  "postCreateCommand": "mkdir -p ${workspaceFolder}airflow ${workspaceFolder}data && psql postgres://ugm_user:ugm_password@localhost:5432/procurement_dw -c 'CREATE SCHEMA IF NOT EXISTS raw; CREATE SCHEMA IF NOT EXISTS analytics;' && airflow db init && airflow users create --username admin --firstname UGM --lastname MKom --role Admin --email example@domain.com --password admin",
-  "postStartCommand": "airflow webserver -D && airflow scheduler -D",
-  "forwardPorts": [8080, 5432],
+  "postCreateCommand": "mkdir -p ${containerWorkspaceFolder}/airflow/dags ${containerWorkspaceFolder}/data ${containerWorkspaceFolder}/data_generator && python -c \"import psycopg2; conn = psycopg2.connect('postgres://admin:admin@postgres:5432/procurement_dw'); cur = conn.cursor(); cur.execute('CREATE SCHEMA IF NOT EXISTS raw; CREATE SCHEMA IF NOT EXISTS analytics;'); conn.commit(); cur.close(); conn.close()\" && airflow db init && airflow users create --username admin --firstname UGM --lastname MKom --role Admin --email example@domain.com --password admin",
+  "postStartCommand": {
+    "runAirflowWebserver": "airflow webserver -H 0.0.0.0",
+    "runAirflowScheduler": "airflow scheduler"
+  },
+  "forwardPorts": [
+    5432,
+    8080
+  ],
   "remoteUser": "vscode"
 }
