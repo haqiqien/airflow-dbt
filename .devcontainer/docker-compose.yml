@@ -1,30 +1,25 @@
-{
-  "name": "UGM Data Warehouse Devcontainer",
-  "dockerComposeFile": "docker-compose.yml",
-  "service": "devcontainer",
-  "workspaceFolder": "/workspace",
-  
-  "remoteEnv": {
-    "AIRFLOW_HOME": "/workspace/airflow"
-  },
+version: '3.8'
 
-  "customizations": {
-    "vscode": {
-      "extensions": [
-        "ms-python.python",
-        "Binnford.dbt-formatter",
-        "innoverio.vscode-dbt-power-user",
-        "mtxr.sqltools",
-        "mtxr.sqltools-driver-pg"
-      ]
-    }
-  },
-  
-  "postCreateCommand": "mkdir -p /workspace/airflow /workspace/data && psql postgres://ugm_user:ugm_password@localhost:5432/procurement_dw -c 'CREATE SCHEMA IF NOT EXISTS raw; CREATE SCHEMA IF NOT EXISTS analytics;' && airflow db init && airflow users create --username admin --firstname UGM --lastname Mahasiswa --role Admin --email mhs@mail.ugm.ac.id --password admin",
+services:
+  devcontainer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      # Jalur mounting default yang direkomendasikan VS Code devcontainer
+      - ..:/workspaces:cached
+    command: sleep infinity
 
-  // Tambahkan baris ini untuk otomatisasi setiap startup:
-  "postStartCommand": "airflow webserver -D && airflow scheduler -D",
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: ugm_user
+      POSTGRES_PASSWORD: ugm_password
+      POSTGRES_DB: procurement_dw
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
 
-  "forwardPorts": [8080, 5432],
-  "remoteUser": "vscode"
-}
+volumes:
+  postgres_data:
