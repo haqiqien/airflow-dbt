@@ -1,28 +1,30 @@
-version: '3.8'
+{
+  "name": "UGM Data Warehouse Devcontainer",
+  "dockerComposeFile": "docker-compose.yml",
+  "service": "devcontainer",
+  "workspaceFolder": "/workspace",
+  
+  "remoteEnv": {
+    "AIRFLOW_HOME": "/workspace/airflow"
+  },
 
-services:
-  # Container Utama untuk Dev Environment
-  devcontainer:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    volumes:
-      - ..:/workspace:cached
-    # Menjaga container tetap hidup
-    command: sleep infinity
-    network_mode: service:postgres # Berbagi network dengan postgres agar mudah diakses
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "Binnford.dbt-formatter",
+        "innoverio.vscode-dbt-power-user",
+        "mtxr.sqltools",
+        "mtxr.sqltools-driver-pg"
+      ]
+    }
+  },
+  
+  "postCreateCommand": "mkdir -p /workspace/airflow /workspace/data && psql postgres://ugm_user:ugm_password@localhost:5432/procurement_dw -c 'CREATE SCHEMA IF NOT EXISTS raw; CREATE SCHEMA IF NOT EXISTS analytics;' && airflow db init && airflow users create --username admin --firstname UGM --lastname Mahasiswa --role Admin --email mhs@mail.ugm.ac.id --password admin",
 
-  # Database PostgreSQL (Bertindak sebagai OLTP, Raw Layer, dan Data Mart)
-  postgres:
-    image: postgres:15-alpine
-    environment:
-      POSTGRES_USER: ugm_user
-      POSTGRES_PASSWORD: ugm_password
-      POSTGRES_DB: procurement_dw
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    ports:
-      - [cite_start]"5432:5432" # Expose port luar agar bisa ditembak dari BI Tools (Sesuai instruksi Tahap 5) [cite: 174]
+  // Tambahkan baris ini untuk otomatisasi setiap startup:
+  "postStartCommand": "airflow webserver -D && airflow scheduler -D",
 
-volumes:
-  postgres_data:
+  "forwardPorts": [8080, 5432],
+  "remoteUser": "vscode"
+}
