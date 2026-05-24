@@ -1,0 +1,28 @@
+version: '3.8'
+
+services:
+  # Container Utama untuk Dev Environment
+  devcontainer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - ..:/workspace:cached
+    # Menjaga container tetap hidup
+    command: sleep infinity
+    network_mode: service:postgres # Berbagi network dengan postgres agar mudah diakses
+
+  # Database PostgreSQL (Bertindak sebagai OLTP, Raw Layer, dan Data Mart)
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: ugm_user
+      POSTGRES_PASSWORD: ugm_password
+      POSTGRES_DB: procurement_dw
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - [cite_start]"5432:5432" # Expose port luar agar bisa ditembak dari BI Tools (Sesuai instruksi Tahap 5) [cite: 174]
+
+volumes:
+  postgres_data:
