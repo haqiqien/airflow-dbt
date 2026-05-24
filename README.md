@@ -14,8 +14,9 @@ Pipeline data engineering end-to-end untuk domain **Procurement**, dibangun di a
 6. [Data Model](#data-model)
 7. [Lapisan dbt](#lapisan-dbt)
 8. [Verifikasi Data](#verifikasi-data)
-9. [Konfigurasi](#konfigurasi)
-10. [Known Issues](#known-issues)
+9. [Melihat Lineage Graph](#melihat-lineage-graph)
+10. [Konfigurasi](#konfigurasi)
+11. [Known Issues](#known-issues)
 
 ---
 
@@ -331,6 +332,51 @@ psql postgresql://admin:admin@postgres:5432/procurement_dw \
 | Q3 | Rata-rata lead time per kategori item | `fct` + `dim_items` |
 | Q4 | Distribusi ketidaksesuaian kuantitas (shortfall) | `fct` |
 | Q5 | Total pengeluaran vs anggaran per departemen | `fct` + `dim_departments` |
+
+---
+
+## Melihat Lineage Graph
+
+### Opsi 1 — VS Code dbt Power User (langsung di editor, tanpa server)
+
+Extension `innoverio.vscode-dbt-power-user` sudah ter-install di devcontainer.
+
+1. Buka file `.sql` model mana saja di `procurement_dw/models/`
+   (mis. [`fct_purchase_order_lines.sql`](procurement_dw/models/marts/fct_purchase_order_lines.sql))
+2. Klik kanan di dalam editor → **"View Lineage"**
+   _atau_ klik ikon lineage (rantai) di toolbar kanan atas editor
+3. Panel lineage muncul di samping — menampilkan upstream & downstream model secara interaktif
+
+> **Tips:** Klik node di panel lineage untuk langsung membuka model tersebut.
+> Extension membaca `dbt_project.yml` dan `manifest.json` dari folder `target/` secara otomatis.
+
+---
+
+### Opsi 2 — dbt Docs (browser, full DAG interaktif)
+
+Port yang digunakan: **8081** (port 8080 sudah dipakai Airflow).
+
+```bash
+cd /workspaces/airflow-dbt/procurement_dw
+
+# Step 1: generate catalog (diperlukan sekali; ulangi setelah dbt run)
+dbt docs generate --profiles-dir . --target dev --no-version-check \
+  2>&1 | tee /tmp/dbt_docs.log; grep -q 'Catalog written to' /tmp/dbt_docs.log
+
+# Step 2: jalankan web server (buka tab terminal baru, Ctrl+C untuk stop)
+dbt docs serve --profiles-dir . --port 8081
+```
+
+Buka browser: **http://localhost:8081**
+
+Navigasi lineage:
+1. Klik nama model di sidebar kiri
+2. Pilih tab **"Lineage"** di panel kanan
+3. Gunakan tombol **`+` / `−`** untuk expand upstream/downstream nodes
+
+> **Catatan protobuf:** `dbt docs generate` terkena bug yang sama seperti `dbt run`
+> (traceback protobuf di akhir). File `catalog.json` tetap ditulis dengan benar —
+> gunakan `grep -q 'Catalog written to'` untuk memverifikasi keberhasilan, bukan exit code.
 
 ---
 
