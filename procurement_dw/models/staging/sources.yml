@@ -1,0 +1,531 @@
+version: 2
+
+# =============================================================================
+# SOURCES: Raw Procurement Data
+# =============================================================================
+# Mendefinisikan semua tabel sumber di skema `raw` yang di-ingest oleh
+# pipeline Airflow (task: ingest_to_postgres).
+#
+# Konvensi:
+#   - source name  : raw_procurement
+#   - identifier   : nama tabel asli di PostgreSQL (snake_case)
+#   - Primary key  : diuji dengan unique + not_null
+#   - Foreign key  : diuji dengan relationships pada level model staging
+# =============================================================================
+
+sources:
+  - name: raw_procurement
+    description: >
+      Raw data domain Procurement yang di-ingest secara Full Load harian
+      dari file CSV ke skema `raw` di PostgreSQL procurement_dw.
+      Setiap tabel memiliki kolom audit `_ingested_at` (TEXT) yang mencatat
+      waktu proses ingest oleh Airflow.
+    database: procurement_dw
+    schema: raw
+    loader: "Airflow BashOperator → psycopg2 (Full Load)"
+
+    # ── Freshness check: peringatkan jika data lebih dari 1 hari ──────────────
+    freshness:
+      warn_after:  { count: 25, period: hour }
+      error_after: { count: 49, period: hour }
+    loaded_at_field: _ingested_at
+
+    tables:
+
+      # ──────────────────────────────────────────────────────────────────────
+      # 1. DEPARTMENTS
+      # ──────────────────────────────────────────────────────────────────────
+      - name: departments
+        description: >
+          Master data departemen perusahaan. Setiap departemen memiliki kode unik,
+          cost center, dan anggaran tahunan. Tabel ini menjadi referensi FK untuk
+          purchase_requests dan purchase_orders.
+        columns:
+          - name: department_id
+            description: "Surrogate key integer untuk departemen (PK)."
+            tests:
+              - unique
+              - not_null
+
+          - name: department_code
+            description: "Kode departemen dalam format DEPTXXX."
+            tests:
+              - unique
+              - not_null
+
+          - name: department_name
+            description: "Nama lengkap departemen."
+            tests:
+              - not_null
+
+          - name: cost_center
+            description: "Kode cost center akuntansi dalam format CCXXXXXX."
+
+          - name: location
+            description: "Kota/lokasi kantor departemen."
+
+          - name: manager_name
+            description: "Nama manajer kepala departemen."
+
+          - name: budget_annual
+            description: "Anggaran tahunan departemen dalam Rupiah (IDR)."
+
+          - name: created_at
+            description: "Tanggal data departemen dibuat (DATE)."
+
+          - name: _ingested_at
+            description: "Timestamp saat baris ini di-ingest oleh Airflow (TEXT)."
+
+      # ──────────────────────────────────────────────────────────────────────
+      # 2. VENDORS
+      # ──────────────────────────────────────────────────────────────────────
+      - name: vendors
+        description: >
+          Master data vendor/pemasok. Berisi informasi kontak, NPWP, kategori
+          barang/jasa, dan status aktif vendor. Tabel ini direferensikan oleh
+          purchase_orders.
+        columns:
+          - name: vendor_id
+            description: "Surrogate key integer untuk vendor (PK)."
+            tests:
+              - unique
+              - not_null
+
+          - name: vendor_code
+            description: "Kode vendor dalam format VNDXXXX."
+            tests:
+              - unique
+              - not_null
+
+          - name: vendor_name
+            description: "Nama resmi vendor (biasanya PT ...)."
+            tests:
+              - not_null
+
+          - name: vendor_category
+            description: "Kategori utama produk/jasa vendor."
+
+          - name: vendor_type
+            description: >
+              Jenis vendor: 'Barang', 'Jasa', atau 'Barang & Jasa'.
+            tests:
+              - not_null
+              - accepted_values:
+                  values: ["Barang", "Jasa", "Barang & Jasa"]
+
+          - name: address
+            description: "Alamat lengkap vendor."
+
+          - name: city
+            description: "Kota domisili vendor."
+
+          - name: province
+            description: "Provinsi domisili vendor."
+
+          - name: postal_code
+            description: >
+              Kode pos (disimpan sebagai BIGINT di raw — perlu di-cast ke TEXT
+              di staging untuk mempertahankan leading zeros).
+
+          - name: phone
+            description: "Nomor telepon vendor."
+
+          - name: email
+            description: "Email bisnis vendor."
+
+          - name: npwp
+            description: "Nomor Pokok Wajib Pajak vendor dalam format XX.XXX.XXX.X-XXX.XXX."
+
+          - name: payment_terms
+            description: "Syarat pembayaran yang disepakati (Net 15 / Net 30 / dll.)."
+
+          - name: rating
+            description: "Rating performa vendor (2.5–5.0)."
+
+          - name: is_active
+            description: "Flag apakah vendor masih aktif (BOOLEAN)."
+            tests:
+              - not_null
+
+          - name: registered_date
+            description: "Tanggal vendor pertama kali terdaftar (DATE)."
+
+          - name: created_at
+            description: "Tanggal record dibuat di sistem (DATE)."
+
+          - name: _ingested_at
+            description: "Timestamp ingest oleh Airflow (TEXT)."
+
+      # ──────────────────────────────────────────────────────────────────────
+      # 3. ITEMS
+      # ──────────────────────────────────────────────────────────────────────
+      - name: items
+        description: >
+          Master katalog barang dan jasa yang dapat dipesan. Berisi informasi
+          harga satuan, satuan ukur, dan minimum order.
+        columns:
+          - name: item_id
+            description: "Surrogate key integer untuk item (PK)."
+            tests:
+              - unique
+              - not_null
+
+          - name: item_code
+            description: "Kode item dalam format ITMXXXX."
+            tests:
+              - unique
+              - not_null
+
+          - name: item_name
+            description: "Nama lengkap barang/jasa."
+            tests:
+              - not_null
+
+          - name: item_category
+            description: "Kategori item (mis. IT & Teknologi, Alat Tulis Kantor)."
+
+          - name: unit_of_measure
+            description: "Satuan ukur (Pcs, Unit, Box, Rim, dll.)."
+            tests:
+              - not_null
+
+          - name: unit_price
+            description: "Harga satuan dalam Rupiah (BIGINT, belum termasuk diskon)."
+
+          - name: min_order_qty
+            description: "Kuantitas minimum pemesanan."
+
+          - name: lead_time_days
+            description: "Estimasi lead time pengiriman standar dalam hari."
+
+          - name: is_active
+            description: "Flag apakah item masih aktif di katalog (BOOLEAN)."
+            tests:
+              - not_null
+
+          - name: created_at
+            description: "Tanggal item ditambahkan ke katalog (DATE)."
+
+          - name: _ingested_at
+            description: "Timestamp ingest oleh Airflow (TEXT)."
+
+      # ──────────────────────────────────────────────────────────────────────
+      # 4. PURCHASE_REQUESTS
+      # ──────────────────────────────────────────────────────────────────────
+      - name: purchase_requests
+        description: >
+          Header permintaan pembelian (PR). Satu PR dibuat oleh satu departemen
+          untuk satu tujuan pembelian. PR yang disetujui (status='Disetujui')
+          akan ditindaklanjuti dengan penerbitan Purchase Order.
+        columns:
+          - name: pr_id
+            description: "Surrogate key integer untuk PR (PK)."
+            tests:
+              - unique
+              - not_null
+
+          - name: pr_number
+            description: "Nomor PR dalam format PR-YYYYMM-XXXXX."
+            tests:
+              - unique
+              - not_null
+
+          - name: pr_date
+            description: "Tanggal PR dibuat (DATE)."
+            tests:
+              - not_null
+
+          - name: department_id
+            description: "FK ke tabel departments."
+            tests:
+              - not_null
+
+          - name: requester_name
+            description: "Nama pemohon yang membuat PR."
+            tests:
+              - not_null
+
+          - name: requester_email
+            description: "Email pemohon."
+
+          - name: purpose
+            description: "Tujuan/alasan pengadaan."
+
+          - name: priority
+            description: "Prioritas PR."
+            tests:
+              - accepted_values:
+                  values: ["Rendah", "Sedang", "Tinggi", "Mendesak"]
+
+          - name: status
+            description: "Status approval PR."
+            tests:
+              - not_null
+              - accepted_values:
+                  values: ["Disetujui", "Ditolak", "Pending Approval"]
+
+          - name: approved_by
+            description: "Nama approver (NULL jika belum disetujui/ditolak)."
+
+          - name: approval_date
+            description: "Tanggal approval (NULL jika status bukan Disetujui)."
+
+          - name: total_amount
+            description: "Total nilai PR dalam Rupiah (diisi setelah PO dibuat)."
+
+          - name: notes
+            description: "Catatan tambahan (nullable)."
+
+          - name: created_at
+            description: "Tanggal record dibuat (DATE)."
+
+          - name: _ingested_at
+            description: "Timestamp ingest oleh Airflow (TEXT)."
+
+      # ──────────────────────────────────────────────────────────────────────
+      # 5. PURCHASE_ORDERS
+      # ──────────────────────────────────────────────────────────────────────
+      - name: purchase_orders
+        description: >
+          Header pesanan pembelian (PO). Setiap PO dibuat dari satu PR yang
+          telah disetujui, ditujukan ke satu vendor, dan berisi satu atau lebih
+          baris item (purchase_order_lines).
+        columns:
+          - name: po_id
+            description: "Surrogate key integer untuk PO (PK)."
+            tests:
+              - unique
+              - not_null
+
+          - name: po_number
+            description: "Nomor PO dalam format PO-YYYYMM-XXXXX."
+            tests:
+              - unique
+              - not_null
+
+          - name: po_date
+            description: "Tanggal PO diterbitkan (DATE)."
+            tests:
+              - not_null
+
+          - name: pr_id
+            description: "FK ke tabel purchase_requests."
+            tests:
+              - not_null
+
+          - name: vendor_id
+            description: "FK ke tabel vendors."
+            tests:
+              - not_null
+
+          - name: department_id
+            description: "FK ke tabel departments."
+            tests:
+              - not_null
+
+          - name: expected_delivery_date
+            description: "Tanggal pengiriman yang diharapkan (DATE)."
+            tests:
+              - not_null
+
+          - name: payment_terms
+            description: "Syarat pembayaran PO ini."
+
+          - name: status
+            description: "Status PO."
+            tests:
+              - not_null
+              - accepted_values:
+                  values: ["Terbuka", "Sebagian Diterima", "Selesai", "Dibatalkan"]
+
+          - name: shipping_address
+            description: "Alamat pengiriman barang."
+
+          - name: approved_by
+            description: "Nama approver PO."
+
+          - name: approval_date
+            description: "Tanggal PO disetujui (DATE)."
+
+          - name: total_amount
+            description: "Total nilai PO dalam Rupiah."
+
+          - name: notes
+            description: "Catatan tambahan (nullable)."
+
+          - name: created_at
+            description: "Tanggal record dibuat (DATE)."
+
+          - name: _ingested_at
+            description: "Timestamp ingest oleh Airflow (TEXT)."
+
+      # ──────────────────────────────────────────────────────────────────────
+      # 6. PURCHASE_ORDER_LINES
+      # ──────────────────────────────────────────────────────────────────────
+      - name: purchase_order_lines
+        description: >
+          Baris detail Purchase Order (tabel transaksi utama, ≥10.000 baris).
+          Setiap baris merepresentasikan satu item dalam satu PO beserta
+          kuantitas, harga, dan diskon yang disepakati.
+        columns:
+          - name: line_id
+            description: "Surrogate key integer untuk baris PO (PK)."
+            tests:
+              - unique
+              - not_null
+
+          - name: po_id
+            description: "FK ke tabel purchase_orders."
+            tests:
+              - not_null
+
+          - name: item_id
+            description: "FK ke tabel items."
+            tests:
+              - not_null
+
+          - name: line_number
+            description: "Nomor urut baris dalam satu PO (dimulai dari 1)."
+            tests:
+              - not_null
+
+          - name: quantity_ordered
+            description: "Kuantitas yang dipesan."
+            tests:
+              - not_null
+
+          - name: unit_of_measure
+            description: "Satuan ukur item pada PO ini."
+
+          - name: unit_price
+            description: "Harga satuan yang disepakati dalam Rupiah."
+            tests:
+              - not_null
+
+          - name: discount_pct
+            description: >
+              Persentase diskon yang diberikan vendor (0–15).
+              Disimpan sebagai BIGINT di raw karena truncation; di staging
+              di-cast ke NUMERIC.
+
+          - name: total_price
+            description: >
+              Nilai total baris = unit_price × quantity_ordered.
+              Belum memperhitungkan diskon.
+
+          - name: delivery_date_expected
+            description: "Tanggal pengiriman yang diharapkan untuk baris ini (DATE)."
+
+          - name: line_status
+            description: "Status baris mengikuti status PO induk."
+
+          - name: notes
+            description: "Catatan tambahan (nullable)."
+
+          - name: created_at
+            description: "Tanggal record dibuat (DATE)."
+
+          - name: _ingested_at
+            description: "Timestamp ingest oleh Airflow (TEXT)."
+
+      # ──────────────────────────────────────────────────────────────────────
+      # 7. GOODS_RECEIPTS
+      # ──────────────────────────────────────────────────────────────────────
+      - name: goods_receipts
+        description: >
+          Dokumen penerimaan barang (GR) yang mencatat kuantitas aktual yang
+          diterima versus yang dipesan. Berisi skenario analitik: lead time
+          realistis dan variasi selisih kuantitas (goods short delivery).
+        columns:
+          - name: gr_id
+            description: "Surrogate key integer untuk GR (PK)."
+            tests:
+              - unique
+              - not_null
+
+          - name: gr_number
+            description: "Nomor GR dalam format GR-YYYYMM-XXXXXX."
+            tests:
+              - unique
+              - not_null
+
+          - name: gr_date
+            description: "Tanggal penerimaan aktual (DATE)."
+            tests:
+              - not_null
+
+          - name: po_id
+            description: "FK ke tabel purchase_orders."
+            tests:
+              - not_null
+
+          - name: po_line_id
+            description: "FK ke tabel purchase_order_lines (line_id)."
+            tests:
+              - not_null
+
+          - name: item_id
+            description: "FK ke tabel items."
+            tests:
+              - not_null
+
+          - name: quantity_ordered
+            description: "Kuantitas yang semula dipesan pada baris PO terkait."
+
+          - name: quantity_received
+            description: "Kuantitas aktual yang diterima."
+            tests:
+              - not_null
+
+          - name: quantity_variance
+            description: "Selisih: quantity_received − quantity_ordered (negatif = kurang)."
+
+          - name: variance_pct
+            description: "Persentase selisih relatif terhadap quantity_ordered."
+
+          - name: receipt_status
+            description: "Kategori penerimaan berdasarkan variance."
+            tests:
+              - not_null
+              - accepted_values:
+                  values:
+                    - "Lengkap"
+                    - "Kurang"
+                    - "Kurang Signifikan"
+                    - "Barang Sangat Kurang"
+                    - "Lebih"
+
+          - name: lead_time_days
+            description: "Selisih hari antara tanggal PO dan tanggal penerimaan aktual."
+            tests:
+              - not_null
+
+          - name: is_on_time
+            description: "TRUE jika gr_date ≤ expected_delivery_date (BOOLEAN)."
+
+          - name: unit_price
+            description: "Harga satuan dari baris PO terkait."
+
+          - name: total_received_value
+            description: "Nilai total penerimaan = unit_price × quantity_received."
+
+          - name: warehouse_location
+            description: "Kode lokasi gudang penerima (mis. WH-A01)."
+
+          - name: received_by
+            description: "Nama petugas penerima barang."
+
+          - name: inspection_status
+            description: "Hasil inspeksi kualitas barang yang diterima."
+            tests:
+              - accepted_values:
+                  values: ["Lulus", "Perlu Pemeriksaan Ulang", "Ditolak"]
+
+          - name: notes
+            description: "Catatan penerimaan (nullable)."
+
+          - name: created_at
+            description: "Tanggal record dibuat (DATE)."
+
+          - name: _ingested_at
+            description: "Timestamp ingest oleh Airflow (TEXT)."

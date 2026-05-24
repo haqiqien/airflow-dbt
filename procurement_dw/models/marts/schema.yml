@@ -1,0 +1,739 @@
+version: 2
+
+# =============================================================================
+# MARTS LAYER — Schema & Quality Tests
+# =============================================================================
+# File ini mendefinisikan dokumentasi dan pengujian kualitas data untuk
+# seluruh tabel di layer Marts (dimensi + fakta).
+#
+# Strategi pengujian:
+#   - Surrogate Key (SK) : unique + not_null  → error (blok deploy jika gagal)
+#   - Natural Key (NK)   : unique pada SCD Type 0/1; tidak unique pada SCD Type 2
+#   - FK ke Dimensi      : relationships      → error
+#   - Kolom kategorik    : accepted_values    → error
+#   - Measures kritis    : not_null           → error
+#   - Measures sekunder  : not_null           → warn  (bisa NULL karena lifecycle)
+# =============================================================================
+
+models:
+
+  # ===========================================================================
+  # DIM_DATE
+  # ===========================================================================
+  - name: dim_date
+    description: >
+      Tabel kalender master 2018–2027. Setiap baris = satu hari.
+      Surrogate key integer YYYYMMDD; tidak perlu join tambahan untuk
+      filter tanggal sederhana. Mencakup atribut Bahasa Indonesia
+      dan flag analitik (is_weekend, is_month_end, dst).
+
+    columns:
+      # ── Surrogate Key ──────────────────────────────────────────────────────
+      - name: date_key
+        description: "PK integer YYYYMMDD (contoh: 20240315). Surrogate key kalender."
+        tests:
+          - unique
+          - not_null
+
+      # ── Tanggal ────────────────────────────────────────────────────────────
+      - name: full_date
+        description: "Nilai tanggal asli (DATE). Digunakan untuk join dengan kolom DATE di fakta."
+        tests:
+          - unique
+          - not_null
+
+      - name: date_label
+        description: "Label tanggal format Indonesia: 'DD Month YYYY'."
+        tests:
+          - not_null
+
+      # ── Hirarki Kalender ───────────────────────────────────────────────────
+      - name: year
+        description: "Tahun kalender (INTEGER, contoh: 2024)."
+        tests:
+          - not_null
+
+      - name: iso_year
+        description: "Tahun ISO untuk kalkulasi minggu ISO."
+        tests:
+          - not_null
+
+      - name: quarter_number
+        description: "Nomor kuartal 1–4."
+        tests:
+          - not_null
+          - accepted_values:
+              values: [1, 2, 3, 4]
+
+      - name: quarter_label
+        description: "Label kuartal: 'Q1', 'Q2', 'Q3', 'Q4'."
+        tests:
+          - not_null
+          - accepted_values:
+              values: ["Q1", "Q2", "Q3", "Q4"]
+
+      - name: year_quarter
+        description: "Format 'YYYY-QN' untuk GROUP BY kuartal (contoh: '2024-Q1')."
+        tests:
+          - not_null
+
+      - name: month_number
+        description: "Nomor bulan 1–12."
+        tests:
+          - not_null
+          - accepted_values:
+              values: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+
+      - name: month_name_id
+        description: "Nama bulan Bahasa Indonesia (Januari–Desember)."
+        tests:
+          - not_null
+          - accepted_values:
+              values: ["Januari","Februari","Maret","April","Mei","Juni",
+                       "Juli","Agustus","September","Oktober","November","Desember"]
+
+      - name: year_month
+        description: "Format 'YYYY-MM' untuk GROUP BY bulanan (contoh: '2024-03')."
+        tests:
+          - not_null
+
+      - name: week_of_year
+        description: "Minggu ISO dalam tahun (1–53)."
+        tests:
+          - not_null
+
+      - name: day_of_month
+        description: "Hari dalam bulan (1–31)."
+        tests:
+          - not_null
+
+      - name: day_of_week_iso
+        description: "Hari dalam minggu ISO: 1=Senin, 7=Minggu."
+        tests:
+          - not_null
+          - accepted_values:
+              values: [1, 2, 3, 4, 5, 6, 7]
+
+      - name: day_name_id
+        description: "Nama hari Bahasa Indonesia (Senin–Minggu)."
+        tests:
+          - not_null
+          - accepted_values:
+              values: ["Senin","Selasa","Rabu","Kamis","Jumat","Sabtu","Minggu"]
+
+      # ── Flags ──────────────────────────────────────────────────────────────
+      - name: is_weekend
+        description: "TRUE jika Sabtu atau Minggu."
+        tests:
+          - not_null
+
+      - name: is_weekday
+        description: "TRUE jika Senin–Jumat."
+        tests:
+          - not_null
+
+      - name: is_first_day_of_month
+        description: "TRUE jika hari pertama bulan."
+        tests:
+          - not_null
+
+      - name: is_last_day_of_month
+        description: "TRUE jika hari terakhir bulan."
+        tests:
+          - not_null
+
+      - name: is_last_day_of_quarter
+        description: "TRUE jika hari terakhir kuartal."
+        tests:
+          - not_null
+
+      - name: fiscal_year
+        description: "Tahun fiskal Indonesia = tahun kalender (Januari–Desember)."
+        tests:
+          - not_null
+
+      - name: fiscal_quarter
+        description: "Kuartal fiskal (1–4), sama dengan quarter_number."
+        tests:
+          - not_null
+
+  # ===========================================================================
+  # DIM_DEPARTMENTS
+  # ===========================================================================
+  - name: dim_departments
+    description: >
+      Dimensi departemen perusahaan. SCD Type 0 (static/fixed) — tidak ada
+      histori perubahan. 30 departemen mencakup seluruh fungsi bisnis
+      dari Pengadaan hingga Manajemen Aset.
+
+    columns:
+      # ── Surrogate Key ──────────────────────────────────────────────────────
+      - name: department_sk
+        description: "Surrogate key MD5(department_id). Stabil lintas run."
+        tests:
+          - unique
+          - not_null
+
+      # ── Natural Key ────────────────────────────────────────────────────────
+      - name: department_id
+        description: "Natural key dari sistem sumber."
+        tests:
+          - unique
+          - not_null
+
+      # ── Atribut ────────────────────────────────────────────────────────────
+      - name: department_code
+        description: "Kode departemen format DEPTXXX."
+        tests:
+          - unique
+          - not_null
+
+      - name: department_name
+        description: "Nama lengkap departemen."
+        tests:
+          - not_null
+
+      - name: cost_center
+        description: "Kode cost center akuntansi."
+        tests:
+          - not_null
+
+      - name: location
+        description: "Kota/lokasi kantor departemen."
+        tests:
+          - not_null
+
+      - name: budget_annual_idr
+        description: "Anggaran tahunan dalam Rupiah."
+        tests:
+          - not_null
+
+      - name: budget_tier
+        description: "Segmentasi anggaran: Anggaran Besar / Menengah / Kecil."
+        tests:
+          - not_null
+          - accepted_values:
+              values: ["Anggaran Besar", "Anggaran Menengah", "Anggaran Kecil"]
+
+      - name: loaded_at
+        description: "Timestamp ingest dari raw ke staging."
+        tests:
+          - not_null
+
+  # ===========================================================================
+  # DIM_ITEMS
+  # ===========================================================================
+  - name: dim_items
+    description: >
+      Dimensi katalog item. SCD Type 1 (overwrite) — perubahan atribut
+      (nama, harga, kategori) menimpa record lama tanpa menyimpan histori.
+      Harga di dimensi ini adalah harga referensi; harga aktual transaksi
+      selalu diambil dari tabel fakta.
+
+    columns:
+      # ── Surrogate Key ──────────────────────────────────────────────────────
+      - name: item_sk
+        description: "Surrogate key MD5(item_id). Stabil karena SCD Type 1 tidak menambah baris."
+        tests:
+          - unique
+          - not_null
+
+      # ── Natural Key ────────────────────────────────────────────────────────
+      - name: item_id
+        description: "Natural key dari sistem sumber (unique karena SCD Type 1)."
+        tests:
+          - unique
+          - not_null
+
+      # ── Atribut ────────────────────────────────────────────────────────────
+      - name: item_code
+        description: "Kode item format ITMXXXX."
+        tests:
+          - unique
+          - not_null
+
+      - name: item_name
+        description: "Nama barang/jasa."
+        tests:
+          - not_null
+
+      - name: item_category
+        description: "Kategori item (8 kategori)."
+        tests:
+          - not_null
+          - accepted_values:
+              values:
+                - "Alat Tulis Kantor"
+                - "IT & Teknologi"
+                - "Furnitur Kantor"
+                - "Peralatan Listrik"
+                - "Bahan Kebersihan"
+                - "Peralatan Keselamatan"
+                - "Spare Part & Mesin"
+                - "Bahan Promosi & Cetak"
+
+      - name: unit_of_measure
+        description: "Satuan ukur item."
+        tests:
+          - not_null
+
+      - name: current_unit_price_idr
+        description: "Harga satuan referensi saat ini (NUMERIC). Bisa berbeda dari harga di fakta."
+        tests:
+          - not_null
+
+      - name: price_tier
+        description: "Segmentasi harga: Murah (<100rb) / Menengah (100rb–1jt) / Mahal (>1jt)."
+        tests:
+          - not_null
+          - accepted_values:
+              values: ["Murah", "Menengah", "Mahal"]
+
+      - name: min_order_qty
+        description: "Kuantitas minimum pemesanan."
+        tests:
+          - not_null
+
+      - name: standard_lead_time_days
+        description: "Lead time pengiriman standar dari katalog item (hari)."
+        tests:
+          - not_null
+
+      - name: is_active
+        description: "TRUE jika item masih aktif di katalog."
+        tests:
+          - not_null
+
+      - name: is_fast_moving
+        description: "TRUE jika standard_lead_time_days <= 3."
+        tests:
+          - not_null
+
+      - name: last_updated_at
+        description: "Timestamp terakhir record ini diperbarui (SCD Type 1 overwrite)."
+        tests:
+          - not_null
+
+  # ===========================================================================
+  # DIM_VENDORS
+  # ===========================================================================
+  - name: dim_vendors
+    description: >
+      Dimensi vendor dengan SCD Type 2 (Add Row). Kolom yang dilacak:
+      vendor_name, city, province, payment_terms. Total 169 records dari
+      150 vendor (19 vendor lama memiliki versi historis tambahan).
+      Gunakan WHERE is_current_record = TRUE untuk data terkini.
+
+    columns:
+      # ── Surrogate Key ──────────────────────────────────────────────────────
+      - name: vendor_sk
+        description: >
+          Surrogate key MD5(vendor_id | dbt_valid_from). Unik per versi record.
+          Satu vendor dapat memiliki LEBIH DARI SATU vendor_sk (satu per versi SCD2).
+        tests:
+          - unique
+          - not_null
+
+      # ── Natural Key (TIDAK unique karena SCD Type 2) ───────────────────────
+      - name: vendor_id
+        description: "Natural key dari sistem sumber. Tidak unique (bisa ada ≥2 versi)."
+        tests:
+          - not_null
+          # Catatan: tidak ada test unique karena SCD Type 2
+
+      # ── Kolom SCD Type 2 ───────────────────────────────────────────────────
+      - name: dbt_valid_from
+        description: "Tanggal record ini mulai berlaku."
+        tests:
+          - not_null
+
+      - name: dbt_valid_to
+        description: >
+          Tanggal record ini berakhir. NULL = record masih aktif (current).
+          Diisi saat ada versi baru yang menggantikan record ini.
+
+      - name: is_current_record
+        description: "TRUE = versi terkini vendor. FALSE = versi historis (sudah expired)."
+        tests:
+          - not_null
+
+      - name: record_version
+        description: "Nomor versi record: 1 = versi pertama, 2 = setelah pertama kali berubah, dst."
+        tests:
+          - not_null
+
+      # ── Atribut Tracked (bisa memicu versi baru saat berubah) ─────────────
+      - name: vendor_name
+        description: "Nama perusahaan vendor (TRACKED — perubahan menciptakan record baru)."
+        tests:
+          - not_null
+
+      - name: city
+        description: "Kota kantor vendor (TRACKED)."
+        tests:
+          - not_null
+
+      - name: province
+        description: "Provinsi kantor vendor (TRACKED)."
+        tests:
+          - not_null
+
+      - name: payment_terms
+        description: "Syarat pembayaran yang disepakati (TRACKED)."
+        tests:
+          - not_null
+          - accepted_values:
+              values: ["Net 15", "Net 30", "Net 45", "Net 60", "COD", "DP 50%", "Net 60"]
+
+      # ── Atribut Non-Tracked ────────────────────────────────────────────────
+      - name: vendor_code
+        description: "Kode vendor (non-tracked)."
+        tests:
+          - not_null
+
+      - name: vendor_category
+        description: "Kategori produk/jasa vendor."
+        tests:
+          - not_null
+
+      - name: vendor_type
+        description: "Tipe vendor: Barang / Jasa / Barang & Jasa."
+        tests:
+          - not_null
+          - accepted_values:
+              values: ["Barang", "Jasa", "Barang & Jasa"]
+
+      - name: is_active
+        description: "Status aktif vendor saat ini."
+        tests:
+          - not_null
+
+      - name: is_goods_vendor
+        description: "TRUE jika vendor menyuplai barang."
+        tests:
+          - not_null
+
+      - name: is_service_vendor
+        description: "TRUE jika vendor menyuplai jasa."
+        tests:
+          - not_null
+
+  # ===========================================================================
+  # FCT_PURCHASE_ORDER_LINES  (Accumulating Snapshot Fact)
+  # ===========================================================================
+  - name: fct_purchase_order_lines
+    description: >
+      Tabel fakta Accumulating Snapshot. Grain: 1 baris per PO Line.
+      Terakumulasi dari 3 milestone: M1=PO terbit, M2=target pengiriman,
+      M3=penerimaan aktual (GR). Setiap milestone menambah kolom baru;
+      baris yang belum mencapai M3 memiliki NULL pada kolom GR-related.
+
+    columns:
+      # ── Surrogate Key Fakta ────────────────────────────────────────────────
+      - name: fct_po_line_sk
+        description: "Surrogate key fakta MD5(po_line_id). PK tabel fakta ini."
+        tests:
+          - unique
+          - not_null
+
+      # ── Foreign Keys ke Dimensi Tanggal ────────────────────────────────────
+      - name: date_key_po_date
+        description: "FK → dim_date.date_key. Tanggal milestone M1: PO diterbitkan."
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_date')
+              field: date_key
+              config:
+                severity: error
+
+      - name: date_key_delivery_expected
+        description: "FK → dim_date.date_key. Tanggal milestone M2: target pengiriman."
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_date')
+              field: date_key
+              config:
+                severity: error
+
+      - name: date_key_gr_date
+        description: >
+          FK → dim_date.date_key. Tanggal milestone M3: penerimaan aktual.
+          NULL jika belum ada Goods Receipt (baris masih dalam lifecycle).
+          Tidak diuji not_null karena NULL adalah status valid.
+        tests:
+          - relationships:
+              to: ref('dim_date')
+              field: date_key
+              where: "date_key_gr_date is not null"
+              config:
+                severity: error
+
+      # ── Foreign Keys ke Dimensi Lain ───────────────────────────────────────
+      - name: vendor_sk
+        description: "FK → dim_vendors.vendor_sk (current record SCD Type 2)."
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_vendors')
+              field: vendor_sk
+              config:
+                severity: error
+
+      - name: department_sk
+        description: "FK → dim_departments.department_sk."
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_departments')
+              field: department_sk
+              config:
+                severity: error
+
+      - name: item_sk
+        description: "FK → dim_items.item_sk."
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_items')
+              field: item_sk
+              config:
+                severity: error
+
+      # ── Natural Keys ───────────────────────────────────────────────────────
+      - name: po_line_id
+        description: "Natural key dari purchase_order_lines. Unik karena grain = 1 per line."
+        tests:
+          - unique
+          - not_null
+
+      - name: po_id
+        description: "FK natural ke purchase_orders (tidak unique di fakta)."
+        tests:
+          - not_null
+
+      - name: vendor_id
+        description: "FK natural ke vendors."
+        tests:
+          - not_null
+
+      - name: department_id
+        description: "FK natural ke departments."
+        tests:
+          - not_null
+
+      - name: item_id
+        description: "FK natural ke items."
+        tests:
+          - not_null
+
+      # ── Tanggal Aktual ─────────────────────────────────────────────────────
+      - name: po_date
+        description: "Tanggal PO diterbitkan (DATE). Kolom asli untuk kalkulasi ad-hoc."
+        tests:
+          - not_null
+
+      - name: po_year
+        description: "Tahun PO (INTEGER). Pre-computed untuk GROUP BY tanpa ekstraksi."
+        tests:
+          - not_null
+
+      - name: po_month
+        description: "Bulan PO 1–12."
+        tests:
+          - not_null
+
+      - name: po_year_month
+        description: "Format 'YYYY-MM' untuk analisis tren bulanan."
+        tests:
+          - not_null
+
+      - name: delivery_date_expected
+        description: "Tanggal pengiriman yang dijanjikan saat PO terbit."
+        tests:
+          - not_null
+
+      - name: gr_date
+        description: "Tanggal penerimaan aktual. NULL = belum ada GR."
+
+      # ── Measures: Kuantitas ────────────────────────────────────────────────
+      - name: quantity_ordered
+        description: "Kuantitas yang dipesan (selalu > 0)."
+        tests:
+          - not_null
+
+      - name: quantity_received
+        description: "Kuantitas aktual yang diterima. NULL = belum ada GR."
+
+      - name: quantity_received_calc
+        description: "quantity_received dengan COALESCE(0). Digunakan untuk kalkulasi."
+        tests:
+          - not_null
+
+      - name: quantity_variance_gr
+        description: >
+          Selisih dari perspektif GR: quantity_received − quantity_ordered.
+          Positif = lebih dari pesan; Negatif = kurang dari pesan.
+        tests:
+          - not_null
+
+      - name: unfulfilled_qty
+        description: "Kuantitas yang belum/tidak terpenuhi: quantity_ordered − quantity_received_calc."
+        tests:
+          - not_null
+
+      - name: fulfillment_pct
+        description: "Persentase pemenuhan (0%–115%). 0% = belum ada GR."
+        tests:
+          - not_null
+
+      # ── Measures: Nilai (IDR) ──────────────────────────────────────────────
+      - name: unit_price_idr
+        description: "Harga satuan sebelum diskon (IDR)."
+        tests:
+          - not_null
+
+      - name: net_unit_price_idr
+        description: "Harga satuan setelah diskon (IDR)."
+        tests:
+          - not_null
+
+      - name: discount_pct
+        description: "Persentase diskon (0.00–15.00)."
+        tests:
+          - not_null
+
+      - name: gross_total_ordered_idr
+        description: "Nilai pesanan sebelum diskon: qty_ordered × unit_price."
+        tests:
+          - not_null
+
+      - name: net_total_ordered_idr
+        description: "Nilai pesanan setelah diskon: qty_ordered × net_unit_price. Benchmark utama."
+        tests:
+          - not_null
+
+      - name: net_total_received_idr
+        description: "Nilai penerimaan aktual: qty_received × net_unit_price. 0 jika belum ada GR."
+        tests:
+          - not_null
+
+      - name: value_shortfall_idr
+        description: >
+          Selisih nilai yang tidak terpenuhi (IDR):
+          net_total_ordered − net_total_received. 0 jika terpenuhi penuh.
+        tests:
+          - not_null
+
+      - name: discount_amount_idr
+        description: "Nominal diskon dalam Rupiah."
+        tests:
+          - not_null
+
+      # ── Measures: Lead Time ────────────────────────────────────────────────
+      - name: expected_lead_time_days
+        description: "Jarak hari PO terbit → target pengiriman (INTEGER)."
+        tests:
+          - not_null
+
+      - name: actual_lead_time_days
+        description: "Jarak hari PO terbit → GR date. NULL jika belum ada GR."
+
+      - name: lead_time_variance_days
+        description: >
+          Selisih lead time: aktual − ekspektasi (hari).
+          Positif = terlambat; Negatif = lebih cepat.
+          NULL jika belum ada GR.
+
+      # ── Status & Lifecycle ─────────────────────────────────────────────────
+      - name: po_status
+        description: "Status PO dari sistem sumber."
+        tests:
+          - not_null
+          - accepted_values:
+              values: ["Terbuka", "Sebagian Diterima", "Selesai", "Dibatalkan"]
+
+      - name: lifecycle_stage
+        description: >
+          Tahap lifecycle order hasil kalkulasi dari int_po_lifecycle.
+          Menggambarkan posisi baris dalam siklus PO → GR.
+        tests:
+          - not_null
+          - accepted_values:
+              values:
+                - "Dibatalkan"
+                - "Menunggu Penerimaan"
+                - "Ditutup Tanpa Penerimaan"
+                - "Selesai – Terpenuhi Penuh"
+                - "Selesai – Terpenuhi Sebagian"
+                - "Tidak Ada Penerimaan"
+
+      - name: receipt_status
+        description: "Status penerimaan barang dari GR."
+        tests:
+          - accepted_values:
+              values:
+                - "Lengkap"
+                - "Kurang"
+                - "Kurang Signifikan"
+                - "Barang Sangat Kurang"
+                - "Lebih"
+              config:
+                where: "receipt_status is not null"
+                severity: error
+
+      - name: delivery_timeliness
+        description: "Kategorisasi ketepatan waktu pengiriman."
+        tests:
+          - accepted_values:
+              values:
+                - "Tepat Waktu"
+                - "Terlambat ≤1 Minggu"
+                - "Terlambat ≤2 Minggu"
+                - "Terlambat ≤1 Bulan"
+                - "Terlambat >1 Bulan"
+              config:
+                where: "delivery_timeliness is not null"
+                severity: warn
+
+      - name: shortage_severity
+        description: "Tingkat keparahan kekurangan kuantitas."
+        tests:
+          - accepted_values:
+              values:
+                - "Tidak Ada Kekurangan"
+                - "Kurang Ringan (<10%)"
+                - "Kurang Sedang (10–25%)"
+                - "Kurang Parah (>25%)"
+              config:
+                where: "shortage_severity is not null"
+                severity: warn
+
+      # ── Flags Boolean ──────────────────────────────────────────────────────
+      - name: has_goods_receipt
+        description: "TRUE jika milestone M3 (GR) sudah tercapai."
+        tests:
+          - not_null
+
+      - name: is_fully_fulfilled
+        description: "TRUE jika qty_received >= qty_ordered."
+        tests:
+          - not_null
+
+      - name: is_short_delivery
+        description: >
+          TRUE jika qty_received < qty_ordered. NULL jika belum ada GR
+          (milestone M3 belum tercapai — tidak bisa dinilai).
+        # Sengaja tidak ada not_null: kolom ini NULL saat has_goods_receipt = FALSE
+
+      - name: is_on_time
+        description: >
+          TRUE jika gr_date <= delivery_date_expected. NULL jika belum ada GR
+          (milestone M3 belum tercapai — tidak bisa dinilai).
+        # Sengaja tidak ada not_null: kolom ini NULL saat has_goods_receipt = FALSE
+
+      - name: has_discount
+        description: "TRUE jika discount_pct > 0."
+        tests:
+          - not_null
