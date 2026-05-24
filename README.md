@@ -22,13 +22,13 @@ Pipeline data engineering end-to-end untuk domain **Procurement**, dibangun di a
 ## Arsitektur
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                       Apache Airflow DAG                        │
-│                    (procurement_pipeline)                        │
-│                                                                  │
-│  [1] generate_data  →  [2] ingest_to_postgres  →  [3] dbt_run  →  [4] dbt_test
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                       Apache Airflow DAG                                        │
+│                    (procurement_pipeline)                                       │
+│                                                                                 │
+│  [1] generate_data  →  [2] ingest_to_postgres  →  [3] dbt_run  →  [4] dbt_test  │
 │   PythonOperator        PythonOperator            BashOperator    BashOperator  │
-└─────────────────────────────────────────────────────────────────┘
+└─────────────────────────────────────────────────────────────────────────────────┘
          │                      │                      │
          ▼                      ▼                      ▼
   data/*.csv (7 file)    raw.* (7 tabel)      staging → intermediate → marts
@@ -206,15 +206,15 @@ dbt test --profiles-dir . --target dev --select marts.fct_purchase_order_lines
                     │  dim_date   │
                     │  date_key   │◄──────────────────┐
                     └─────────────┘                   │ (×3: po, delivery, gr)
-                                                       │
+                                                      │
 ┌──────────────┐   ┌────────────────────────────────────────────────┐   ┌──────────────────┐
 │ dim_vendors  │   │          fct_purchase_order_lines              │   │  dim_departments │
 │  (SCD 2)     │◄──│                                                │──►│   (SCD 0)        │
-└──────────────┘   │  Grain : 1 baris per PO line                  │   └──────────────────┘
-                   │  Pola  : Accumulating Snapshot                  │
+└──────────────┘   │  Grain : 1 baris per PO line                   │   └──────────────────┘
+                   │  Pola  : Accumulating Snapshot                 │
 ┌──────────────┐   │                                                │   ┌──────────────────┐
 │  dim_items   │◄──│  Milestone M1: po_date                         │   │                  │
-│  (SCD 1)     │   │  Milestone M2: delivery_date_expected           │   │                  │
+│  (SCD 1)     │   │  Milestone M2: delivery_date_expected          │   │                  │
 └──────────────┘   │  Milestone M3: gr_date (NULL = belum diterima) │   │                  │
                    └────────────────────────────────────────────────┘   └──────────────────┘
 ```
