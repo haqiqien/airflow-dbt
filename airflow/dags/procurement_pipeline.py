@@ -49,11 +49,20 @@ import time
 from datetime import datetime, timedelta
 
 from airflow import DAG
+from airflow.datasets import Dataset
 from airflow.operators.bash import BashOperator
 from airflow.operators.python import PythonOperator
 from airflow.utils.trigger_rule import TriggerRule
 
 log = logging.getLogger(__name__)
+
+# =============================================================================
+# AIRFLOW DATASETS – merepresentasikan output dari setiap stage pipeline
+# URI berfungsi sebagai identifier unik untuk tracking data lineage di UI.
+# =============================================================================
+DATASET_CSV    = Dataset("file:///workspaces/airflow-dbt/data/")
+DATASET_RAW_PG = Dataset("postgresql://postgres:5432/procurement_dw/raw")
+DATASET_MARTS  = Dataset("postgresql://postgres:5432/procurement_dw/analytics")
 
 # =============================================================================
 # CONFIG – sesuaikan path dan koneksi di sini
@@ -312,6 +321,7 @@ generate_data ──► ingest_to_postgres ──► dbt_run ──► dbt_test
             f"python {GENERATOR_SCRIPT} && "
             f"echo '[generate_data] Selesai. File CSV tersedia di {DATA_DIR}'"
         ),
+        outlets           = [DATASET_CSV],   # menghasilkan file CSV di ./data/
         # Generate data lebih cepat pulih; tidak perlu 3x retry
         retries           = 2,
         retry_delay       = timedelta(minutes=2),
@@ -326,6 +336,8 @@ generate_data ──► ingest_to_postgres ──► dbt_run ──► dbt_test
     t_ingest = PythonOperator(
         task_id         = "ingest_to_postgres",
         python_callable = ingest_csv_to_postgres,
+        inlets            = [DATASET_CSV],      # mengkonsumsi file CSV dari generate_data
+        outlets           = [DATASET_RAW_PG],   # menghasilkan tabel di skema raw PostgreSQL
         # provide_context sudah default True di Airflow 2.x bila ada **context
         retries           = 3,
         retry_delay       = timedelta(minutes=5),
@@ -358,6 +370,8 @@ generate_data ──► ingest_to_postgres ──► dbt_run ──► dbt_test
             "grep -q 'Completed successfully' /tmp/dbt_run_output.log && "
             "echo '[dbt_run] Transformasi selesai.'"
         ),
+        inlets            = [DATASET_RAW_PG],   # mengkonsumsi tabel raw dari ingest_to_postgres
+        outlets           = [DATASET_MARTS],     # menghasilkan tabel marts hasil transformasi dbt
         env = {
             # Teruskan semua env var yang ada + override khusus dbt
             **{k: v for k, v in os.environ.items()},
@@ -391,6 +405,7 @@ generate_data ──► ingest_to_postgres ──► dbt_run ──► dbt_test
             "grep -q 'Completed successfully' /tmp/dbt_test_output.log && "
             "echo '[dbt_test] Semua test lulus.'"
         ),
+        inlets            = [DATASET_MARTS],    # memvalidasi tabel marts hasil dbt_run
         env = {
             **{k: v for k, v in os.environ.items()},
             "DBT_PROFILES_DIR": DBT_PROFILES_DIR,
