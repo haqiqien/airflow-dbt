@@ -6,7 +6,7 @@ Pipeline ETL domain Procurement yang mengotomatiskan alur data end-to-end.
 
 ALUR TASK
 ─────────
-  generate_data  ──►  ingest_to_postgres  ──►  dbt_run  ──►  dbt_test
+  generate_data  ──►  ingest_to_postgres  ──►  dbt_run  ──►  dbt_test  ──►  marts_verification
 
 DETAIL TASK
 ───────────
@@ -26,6 +26,10 @@ DETAIL TASK
   4. dbt_test            [BashOperator]
        Menjalankan `dbt test` untuk memvalidasi kualitas data hasil transformasi.
 
+  5. marts_verification  [BashOperator]
+       Menjalankan script queries/run_verifications.py untuk smoke test mart
+       dan query bisnis per stakeholder.
+
 KONFIGURASI
 ───────────
   Sesuaikan konstanta di blok CONFIG di bawah sebelum menjalankan DAG.
@@ -38,6 +42,7 @@ RETRY LOGIC
   ingest_to_postgres : retries=3, delay=5m, exponential backoff (I/O network)
   dbt_run            : retries=2, delay=5m  (idempoten, re-run aman)
   dbt_test           : retries=1, delay=3m  (jika test gagal, umumnya memang ada masalah data)
+  marts_verification : retries=1, delay=3m  (validasi/reporting setelah mart siap)
 =============================================================================
 """
 
@@ -70,6 +75,7 @@ DATASET_MARTS  = Dataset("postgresql://postgres:5432/procurement_dw/analytics")
 WORKSPACE_DIR   = "/workspaces/airflow-dbt"
 DATA_DIR        = os.path.join(WORKSPACE_DIR, "data")
 GENERATOR_SCRIPT= os.path.join(WORKSPACE_DIR, "data_generator", "generate_data.py")
+VERIFICATION_SCRIPT = os.path.join(WORKSPACE_DIR, "queries", "run_verifications.py")
 DBT_PROJECT_DIR = os.getenv("DBT_PROJECT_DIR",  os.path.join(WORKSPACE_DIR, "procurement_dw"))
 DBT_PROFILES_DIR= os.getenv("DBT_PROFILES_DIR", os.path.join(WORKSPACE_DIR, "procurement_dw"))
 
@@ -282,14 +288,14 @@ default_args = {
 # =============================================================================
 with DAG(
     dag_id           = "procurement_pipeline",
-    description      = "ETL Pipeline Procurement: Generate Data → Ingest PostgreSQL → dbt run → dbt test",
+    description      = "ETL Pipeline Procurement: Generate Data → Ingest PostgreSQL → dbt run → dbt test → marts verification",
     schedule_interval= "@daily",
     start_date       = datetime(2024, 1, 1),
     catchup          = False,
     max_active_runs  = 1,          # hindari pipeline concurrent yang berebut resource
     dagrun_timeout   = timedelta(hours=3),
     default_args     = default_args,
-    tags             = ["procurement", "etl", "dbt", "raw"],
+    tags             = ["procurement", "etl", "dbt", "raw", "verification"],
     doc_md           = """
 ## 🏗️ Procurement ETL Pipeline
 
@@ -297,17 +303,19 @@ Pipeline harian yang mengotomatiskan alur data Procurement end-to-end.
 
 ### Task Flow
 ```
-generate_data ──► ingest_to_postgres ──► dbt_run ──► dbt_test
+generate_data ──► ingest_to_postgres ──► dbt_run ──► dbt_test ──► marts_verification
 ```
 
 ### Persyaratan Sebelum Menjalankan
 - Postgres aktif dan bisa dijangkau di `postgres:5432`
 - Folder `./data/` dapat ditulis oleh proses Airflow
 - Proyek dbt tersedia di `DBT_PROJECT_DIR` (untuk task dbt_run & dbt_test)
+- Script verifikasi tersedia di `queries/run_verifications.py`
 
 ### Output
 - **`raw.*`** : 7 tabel staging di PostgreSQL (hasil ingest CSV)
 - **marts/core** : tabel hasil transformasi dbt (setelah dbt_run)
+- **laporan verifikasi** : smoke test mart dan query bisnis per stakeholder (setelah dbt_test)
 """,
 ) as dag:
 
@@ -424,6 +432,29 @@ generate_data ──► ingest_to_postgres ──► dbt_run ──► dbt_test
     )
 
     # ──────────────────────────────────────────────────────────────────
+    # TASK 5 ─ marts_verification
+    # ──────────────────────────────────────────────────────────────────
+    t_marts_verification = BashOperator(
+        task_id      = "marts_verification",
+        bash_command = (
+            "echo '[marts_verification] Memulai verifikasi data mart...' && "
+            f"cd {WORKSPACE_DIR} && "
+            f"python {VERIFICATION_SCRIPT} && "
+            "echo '[marts_verification] Verifikasi marts selesai.'"
+        ),
+        inlets            = [DATASET_MARTS],
+        retries           = 1,
+        retry_delay       = timedelta(minutes=3),
+        retry_exponential_backoff = False,
+        execution_timeout = timedelta(minutes=20),
+        trigger_rule      = TriggerRule.ALL_SUCCESS,
+        doc_md            = (
+            f"Menjalankan `{VERIFICATION_SCRIPT}` setelah `dbt test` sukses "
+            "untuk smoke test mart dan query bisnis per stakeholder."
+        ),
+    )
+
+    # ──────────────────────────────────────────────────────────────────
     # TASK DEPENDENCIES
     # ──────────────────────────────────────────────────────────────────
-    t_generate >> t_ingest >> t_dbt_run >> t_dbt_test
+    t_generate >> t_ingest >> t_dbt_run >> t_dbt_test >> t_marts_verification
