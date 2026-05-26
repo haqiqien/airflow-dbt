@@ -2,11 +2,19 @@
   "name": "UGM Data Warehouse Devcontainer",
   "dockerComposeFile": "docker-compose.yml",
   "service": "devcontainer",
+  "features": {
+    "ghcr.io/anthropics/devcontainer-features/claude-code:1": {}
+  },
+  "mounts": [
+    "source=${localEnv:HOME}/.claude,target=/home/vscode/.claude,type=bind,consistency=cached"
+  ],
   "remoteEnv": {
     "AIRFLOW_HOME": "${containerWorkspaceFolder}/airflow",
     "AIRFLOW__DATABASE__SQL_ALCHEMY_CONN": "postgresql+psycopg2://admin:admin@postgres:5432/procurement_dw",
     "AIRFLOW__CORE__EXECUTOR": "LocalExecutor",
-    "AIRFLOW__CORE__LOAD_EXAMPLES": "False" 
+    "AIRFLOW__CORE__LOAD_EXAMPLES": "False",
+    "DBT_PROJECT_DIR":  "${containerWorkspaceFolder}/procurement_dw",
+    "DBT_PROFILES_DIR": "${containerWorkspaceFolder}/procurement_dw"
   },
   "customizations": {
     "vscode": {
@@ -15,7 +23,8 @@
         "Binnford.dbt-formatter",
         "innoverio.vscode-dbt-power-user",
         "mtxr.sqltools",
-        "mtxr.sqltools-driver-pg"
+        "mtxr.sqltools-driver-pg",
+        "anthropic.claude-code"
       ]
     }
   },
