@@ -70,8 +70,8 @@ DATASET_MARTS  = Dataset("postgresql://postgres:5432/procurement_dw/analytics")
 WORKSPACE_DIR   = "/workspaces/airflow-dbt"
 DATA_DIR        = os.path.join(WORKSPACE_DIR, "data")
 GENERATOR_SCRIPT= os.path.join(WORKSPACE_DIR, "data_generator", "generate_data.py")
-DBT_PROJECT_DIR = os.path.join(WORKSPACE_DIR, "procurement_dw")
-DBT_PROFILES_DIR= os.path.join(WORKSPACE_DIR, "procurement_dw")
+DBT_PROJECT_DIR = os.getenv("DBT_PROJECT_DIR",  os.path.join(WORKSPACE_DIR, "procurement_dw"))
+DBT_PROFILES_DIR= os.getenv("DBT_PROFILES_DIR", os.path.join(WORKSPACE_DIR, "procurement_dw"))
 
 # Koneksi PostgreSQL (bisa juga diganti dengan Airflow Connection ID)
 PG_CONN_STRING  = "postgresql+psycopg2://admin:admin@postgres:5432/procurement_dw"
