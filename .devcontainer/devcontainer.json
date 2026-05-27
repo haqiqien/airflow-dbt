@@ -5,9 +5,6 @@
   "features": {
     "ghcr.io/anthropics/devcontainer-features/claude-code:1": {}
   },
-  "mounts": [
-    "source=${localEnv:HOME}/.claude,target=/home/vscode/.claude,type=bind,consistency=cached"
-  ],
   "remoteEnv": {
     "AIRFLOW_HOME": "${containerWorkspaceFolder}/airflow",
     "AIRFLOW__DATABASE__SQL_ALCHEMY_CONN": "postgresql+psycopg2://admin:admin@postgres:5432/procurement_dw",
@@ -22,8 +19,7 @@
         "ms-python.python",
         "Binnford.dbt-formatter",
         "innoverio.vscode-dbt-power-user",
-        "mtxr.sqltools",
-        "mtxr.sqltools-driver-pg",
+        "ms-ossdata.vscode-pgsql",
         "anthropic.claude-code"
       ]
     }
@@ -31,11 +27,13 @@
   "postCreateCommand": "mkdir -p ${containerWorkspaceFolder}/airflow/dags ${containerWorkspaceFolder}/data ${containerWorkspaceFolder}/data_generator && python -c \"import psycopg2; conn = psycopg2.connect('postgres://admin:admin@postgres:5432/procurement_dw'); cur = conn.cursor(); cur.execute('CREATE SCHEMA IF NOT EXISTS raw; CREATE SCHEMA IF NOT EXISTS analytics;'); conn.commit(); cur.close(); conn.close()\" && airflow db init && airflow users create --username admin --firstname UGM --lastname MKom --role Admin --email example@domain.com --password admin",
   "postStartCommand": {
     "runAirflowWebserver": "airflow webserver -H 0.0.0.0",
-    "runAirflowScheduler": "airflow scheduler"
+    "runAirflowScheduler": "airflow scheduler",
+    "runDBTDocsServer": "dbt docs serve --host 0.0.0.0 --port 8081"
   },
   "forwardPorts": [
     5432,
-    8080
+    8080,
+    8081
   ],
   "remoteUser": "vscode"
 }
